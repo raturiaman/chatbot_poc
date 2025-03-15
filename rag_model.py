@@ -2,10 +2,11 @@ import os
 import openai
 import PyPDF2
 import numpy as np
+from openai.embeddings_utils import get_embedding  # New helper in OpenAI v1.0.0+
 
 class HRPolicyRAG:
     def __init__(self, pdf_path, openai_api_key, embedding_model="text-embedding-ada-002"):
-        # Set the OpenAI API key from the provided credential
+        # Set the API key
         openai.api_key = openai_api_key
         self.pdf_path = pdf_path
         self.embedding_model = embedding_model
@@ -30,7 +31,7 @@ class HRPolicyRAG:
                     except Exception as e:
                         texts.append(f"Error reading PDF {file}: {e}")
         else:
-            # If it's a single file, process it
+            # Process a single PDF file
             try:
                 with open(pdf_path, "rb") as f:
                     reader = PyPDF2.PdfReader(f)
@@ -43,31 +44,23 @@ class HRPolicyRAG:
         return texts
 
     def get_embedding(self, text):
-        # Use OpenAI's API to get an embedding for the given text
-        response = openai.Embedding.create(
-            input=text,
-            model=self.embedding_model
-        )
-        embedding = response['data'][0]['embedding']
+        # Use the new helper to get an embedding
+        embedding = get_embedding(text, engine=self.embedding_model)
         return np.array(embedding)
 
     def cosine_similarity(self, vec1, vec2):
-        # Compute cosine similarity between two vectors
         return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2) + 1e-8)
 
     def get_answer(self, question, threshold=0.75):
-        # Compute embedding for the question
         question_embedding = self.get_embedding(question)
         similarities = [self.cosine_similarity(question_embedding, doc_emb) for doc_emb in self.doc_embeddings]
         max_sim = max(similarities)
         best_index = np.argmax(similarities)
 
-        # If similarity is below threshold, return a fallback message
         if max_sim < threshold:
             return "Please contact HR department"
         else:
             context = self.documents[best_index]
-            # Build a prompt that includes the retrieved context
             prompt = (
                 f"Using the following HR policy context, answer the question.\n\n"
                 f"Context:\n{context}\n\n"

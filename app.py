@@ -8,14 +8,13 @@ st.title("HR Policy Chatbot")
 pdf_path = st.secrets["PDF_PATH"]         # e.g., "pdfs"
 openai_api_key = st.secrets["OPENAI_API_KEY"]
 
-# Load the RAG model (cached so it loads only once)
 @st.cache_resource
 def load_model():
     return HRPolicyRAG(pdf_path, openai_api_key)
 
 model = load_model()
 
-# Initialize conversation history in session state if not already present.
+# Initialize conversation history
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
 
@@ -26,19 +25,18 @@ suggestions = [
     "What benefits do employees receive?"
 ]
 
-# Display suggestion buttons at the top of the chat interface.
+# Display suggestion buttons.
 st.markdown("#### Suggested Questions:")
 cols = st.columns(len(suggestions))
 for idx, sug in enumerate(suggestions):
     if cols[idx].button(sug, key=f"sug_{idx}"):
-        # Process the suggestion immediately.
         st.session_state["messages"].append({"role": "user", "content": sug})
         with st.spinner("Generating answer..."):
             answer = model.get_answer(sug)
         st.session_state["messages"].append({"role": "assistant", "content": answer})
         st.experimental_rerun()
 
-# Display the chat conversation.
+# Display conversation history.
 st.markdown("### Conversation")
 for msg in st.session_state["messages"]:
     if msg["role"] == "user":

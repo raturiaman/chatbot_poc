@@ -5,12 +5,13 @@ import numpy as np
 
 class HRPolicyRAG:
     def __init__(self, pdf_path, openai_api_key, embedding_model="text-embedding-ada-002"):
-        # Set the OpenAI API key.
+        # Set the API key for OpenAI.
         openai.api_key = openai_api_key
         self.pdf_path = pdf_path
         self.embedding_model = embedding_model
         self.documents = self._extract_text_from_pdf(pdf_path)
-        # Pre-compute embeddings only if documents were extracted.
+        # Only compute embeddings for non-empty documents.
+        self.documents = [doc for doc in self.documents if doc.strip()]
         if self.documents:
             self.doc_embeddings = [self.get_embedding(doc) for doc in self.documents]
         else:
@@ -46,7 +47,7 @@ class HRPolicyRAG:
         return texts
 
     def get_embedding(self, text):
-        # Use OpenAI API to get an embedding.
+        # Use OpenAI API to create an embedding.
         response = openai.Embedding.create(
             input=text,
             model=self.embedding_model
@@ -66,14 +67,14 @@ class HRPolicyRAG:
         question_embedding = self.get_embedding(question)
         similarities = [self.cosine_similarity(question_embedding, doc_emb) for doc_emb in self.doc_embeddings]
         
-        # Guard against an empty similarities list.
+        # If for any reason similarities is empty, return fallback.
         if not similarities:
             return "No HR policy documents available. Please contact HR department."
         
         max_sim = max(similarities)
         best_index = np.argmax(similarities)
 
-        # If similarity is below threshold, fallback.
+        # If similarity is below threshold, return fallback.
         if max_sim < threshold:
             return "Please contact HR department"
         else:

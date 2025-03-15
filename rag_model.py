@@ -1,98 +1,165 @@
+from langchain.document_loaders import PyPDFDirectoryLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.vectorstores import Pinecone
+from langchain.memory import ConversationBufferMemory, ConversationBufferWindowMemory
+from langchain.prompts import PromptTemplate
+from langchain.chains import ConversationalRetrievalChain
+from langchain.llms import OpenAI
+import streamlit as st
 import os
-import openai
-import PyPDF2
-import numpy as np
 
-class HRPolicyRAG:
-    def __init__(self, pdf_path, openai_api_key, embedding_model="text-embedding-ada-002"):
-        # Set the API key for OpenAI.
-        openai.api_key = openai_api_key
-        self.pdf_path = pdf_path
-        self.embedding_model = embedding_model
-        self.documents = self._extract_text_from_pdf(pdf_path)
-        # Only compute embeddings for non-empty documents.
-        self.documents = [doc for doc in self.documents if doc.strip()]
-        if self.documents:
-            self.doc_embeddings = [self.get_embedding(doc) for doc in self.documents]
-        else:
-            self.doc_embeddings = []
 
-    def _extract_text_from_pdf(self, pdf_path):
-        texts = []
-        # If the given path is a directory, iterate over all PDF files.
-        if os.path.isdir(pdf_path):
-            for file in os.listdir(pdf_path):
-                if file.lower().endswith(".pdf"):
-                    full_path = os.path.join(pdf_path, file)
-                    try:
-                        with open(full_path, "rb") as f:
-                            reader = PyPDF2.PdfReader(f)
-                            for page in reader.pages:
-                                text = page.extract_text()
-                                if text:
-                                    texts.append(text)
-                    except Exception as e:
-                        texts.append(f"Error reading PDF {file}: {e}")
-        else:
-            # If a single file is provided.
-            try:
-                with open(pdf_path, "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
-                    for page in reader.pages:
-                        text = page.extract_text()
-                        if text:
-                            texts.append(text)
-            except Exception as e:
-                texts.append("Error reading PDF: " + str(e))
-        return texts
+#----------------- Setting -------------------------
+api_key_openai = st.secrets["api_key_openai"]
+api_key_pinecone = st.secrets["api_key_pinecone"]
+directory = st.secrets["directory"]
+index_name=st.secrets["index_name"]
+#----------------- Setting -------------------------
+ 
+def setup_openai_api(api_key):
+    if "OPENAI_API_KEY" not in os.environ:
+        os.environ["OPENAI_API_KEY"] = api_key_openai
+        print("OPENAI_API_KEY has been set!")
+    else:
+        exit
+    
+ 
+def setup_pinecone_api(api_key):
+    if "PINECONE_API_KEY" not in os.environ:
+        os.environ["PINECONE_API_KEY"] = api_key_pinecone
+    else:
+        exit
 
-    def get_embedding(self, text):
-        # Use OpenAI API to create an embedding.
-        response = openai.Embedding.create(
-            input=text,
-            model=self.embedding_model
-        )
-        embedding = response['data'][0]['embedding']
-        return np.array(embedding)
+    
+ 
+def read_doc(directory):
+    file_loader = PyPDFDirectoryLoader(directory)
+    documents = file_loader.load()
+    return documents
+ 
+def chunk_data(documents, chunk_size=800, chunk_overlap=50):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunks = text_splitter.split_documents(documents)
+    return chunks
+ 
+def initialize_embeddings():
+    embeddings = OpenAIEmbeddings()
+    return embeddings
+ 
 
-    def cosine_similarity(self, vec1, vec2):
-        return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2) + 1e-8)
+# if "context_mem" not in st.session_state:
+#     memory= ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=5)
+#     st.session_state["context_mem"] = memory
+# else:
+#     memory=st.session_state["context_mem"]
 
-    def get_answer(self, question, threshold=0.75):
-        # Check if there are any document embeddings.
-        if not self.doc_embeddings:
-            return "No HR policy documents available. Please contact HR department."
-        
-        # Compute embedding for the question.
-        question_embedding = self.get_embedding(question)
-        similarities = [self.cosine_similarity(question_embedding, doc_emb) for doc_emb in self.doc_embeddings]
-        
-        # If for any reason similarities is empty, return fallback.
-        if not similarities:
-            return "No HR policy documents available. Please contact HR department."
-        
-        max_sim = max(similarities)
-        best_index = np.argmax(similarities)
 
-        # If similarity is below threshold, return fallback.
-        if max_sim < threshold:
-            return "Please contact HR department"
-        else:
-            context = self.documents[best_index]
-            prompt = (
-                f"Using the following HR policy context, answer the question.\n\n"
-                f"Context:\n{context}\n\n"
-                f"Question: {question}\n\n"
-                "Answer:"
-            )
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an HR policy assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                max_tokens=300
-            )
-            answer = response['choices'][0]['message']['content'].strip()
-            return answer
+
+def create_retrieval_chain(vectorstore, embeddings, memory):
+    chain = ConversationalRetrievalChain.from_llm(
+        OpenAI(), 
+        vectorstore.as_retriever(search_kwargs={'k':3}),
+        memory=memory,
+        condense_question_prompt=condense_question_prompt_template,
+        combine_docs_chain_kwargs=dict(prompt=qa_prompt),
+        verbose=True
+    )
+    return chain
+ 
+
+chat_history=[]
+
+def perform_conversational_retrieval(chain, query):
+    if "context_mem" not in st.session_state:
+        memory= ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=5)
+        st.session_state["context_mem"] = memory
+    else:
+        memory=st.session_state["context_mem"]
+    output = chain(query, memory)
+    chat_history.append(output)
+    return output
+
+
+
+setup_openai_api(api_key_openai)
+setup_pinecone_api(api_key_pinecone)
+documents = read_doc(directory)
+chunks = chunk_data(documents)
+embeddings = initialize_embeddings()
+
+
+
+
+def ask_model(api_key_openai, api_key_pinecone, directory):
+    
+    #index = Pinecone.from_documents(chunks, embeddings, index_name=index_name)
+    vectorstore = Pinecone.from_existing_index(index_name=index_name,embedding = embeddings, namespace="")
+    if "context_mem" not in st.session_state:
+        memory= ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=5)
+        st.session_state["context_mem"] = memory
+    else:
+        memory=st.session_state["context_mem"]
+    chain = create_retrieval_chain(vectorstore,embeddings, memory=memory)
+    return chain
+
+
+
+_template = """Given the following conversation and a follow up question, rephrase the follow up question to be a 
+standalone question without changing the content in given question. If the question is not related to previous context, Please DO NOT rephrase it. Answer the question directly.
+examples = [
+    [
+        "question":explain Economy?,
+        "answer":
+Follow up:explain it in terms  of green growth? 
+standalone question:explain economy in terms  of green growth?
+Follow up:under which scheme we provide food to 80 crore people in pandamic?
+standalone question:under which scheme we provide food to 80 crore people in pandamic?
+    ],
+    [
+        "question":under which scheme we provide food to 80 crore people in pandamic?
+        "answer":
+Follow up:what is the entire expenditure  in that scheme?
+standalone question:what is the entire expenditure in PMGKAY scheme?
+Follow up:Define PM Awas Yojana?
+standalone question:Define PM Awas Yojana?
+    ],
+    [
+        "question":what are the types of leaves?
+        "answer":
+Follow up: tell me about maternity leave?
+standalone question:explain in brief about maternity leave?
+    ]
+
+]   
+
+Chat History:
+{chat_history}
+Follow Up Input: {question}
+Standalone question:"""
+
+condense_question_prompt_template = PromptTemplate.from_template(_template)
+
+# """You are helpful information giving QA System for HR Policies. Make sure you don't answer anything not related \
+# to following context. You will have useful information & details available in the given context. Use the following\
+# piece of context to answer the question at the end. If you don't know the answer, just say that you don't know. Don't\
+# try to make up an answer. If the question is not related to previous context,Please DO NOT rephrase it. Answer the question directly."""
+
+
+
+prompt_template = """You are a helpful information giving QA assistant for HR Policies. You will be given the Policies in the context below.\
+You know about the leaves, attendance, loan and every other policy given in the context. 
+Make sure you don't answer anything not related to following context. If you don't know the answer,\
+just say that you don't know. Don't try to make up an answer. If the question is not related to\
+previous context,Please DO NOT rephrase it. Answer the question directly.
+
+{context}
+
+Question: {question}
+Helpful Answer:"""
+
+
+qa_prompt = PromptTemplate(
+    template=prompt_template, input_variables=["context", "question"]
+)
+ 

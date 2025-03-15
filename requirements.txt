@@ -1,4 +1,11 @@
-streamlit
-openai==0.28
+pypdf
 PyPDF2
-numpy
+streamlit
+pinecone-client
+openai
+langchain
+langchain-community
+langchain-core
+langchain-experimental
+langchain-openai
+langchain-pinecone

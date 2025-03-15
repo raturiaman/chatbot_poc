@@ -4,8 +4,9 @@ from rag_model import HRPolicyRAG
 st.set_page_config(page_title="HR Policy Chatbot", page_icon="🤖", layout="wide")
 st.title("HR Policy Chatbot")
 
-# Retrieve sensitive data from Streamlit Cloud secrets
-pdf_path = st.secrets["PDF_PATH"]         # e.g., "pdfs"
+# Retrieve sensitive data from Streamlit Cloud secrets.
+# Ensure your secrets.toml has PDF_PATH = "./pdfs" and your OpenAI API key.
+pdf_path = st.secrets["PDF_PATH"]         # e.g., "./pdfs"
 openai_api_key = st.secrets["OPENAI_API_KEY"]
 
 @st.cache_resource
@@ -14,18 +15,18 @@ def load_model():
 
 model = load_model()
 
-# Initialize conversation history in session state if not already present.
+# Initialize conversation history.
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
 
-# Define a list of suggested questions.
+# Suggested questions.
 suggestions = [
     "What is the leave policy?",
     "How can I update my personal details?",
     "What benefits do employees receive?"
 ]
 
-# Display suggestion buttons above the chat input.
+# Display suggestion buttons.
 st.markdown("#### Suggested Questions:")
 cols = st.columns(len(suggestions))
 for idx, sug in enumerate(suggestions):
@@ -36,7 +37,7 @@ for idx, sug in enumerate(suggestions):
         st.session_state["messages"].append({"role": "assistant", "content": answer})
         st.experimental_rerun()
 
-# Display the chat conversation.
+# Display conversation history.
 st.markdown("### Conversation")
 for msg in st.session_state["messages"]:
     if msg["role"] == "user":

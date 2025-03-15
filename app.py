@@ -14,7 +14,7 @@ def load_model():
 
 model = load_model()
 
-# Initialize conversation history
+# Initialize conversation history in session state if not already present.
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
 
@@ -25,7 +25,7 @@ suggestions = [
     "What benefits do employees receive?"
 ]
 
-# Display suggestion buttons.
+# Display suggestion buttons above the chat input.
 st.markdown("#### Suggested Questions:")
 cols = st.columns(len(suggestions))
 for idx, sug in enumerate(suggestions):
@@ -36,7 +36,7 @@ for idx, sug in enumerate(suggestions):
         st.session_state["messages"].append({"role": "assistant", "content": answer})
         st.experimental_rerun()
 
-# Display conversation history.
+# Display the chat conversation.
 st.markdown("### Conversation")
 for msg in st.session_state["messages"]:
     if msg["role"] == "user":

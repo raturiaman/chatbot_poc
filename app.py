@@ -1,38 +1,56 @@
 import streamlit as st
 from rag_model import HRPolicyRAG
 
+st.set_page_config(page_title="HR Policy Chatbot", page_icon="🤖", layout="wide")
 st.title("HR Policy Chatbot")
 
-# Retrieve the PDF path and OpenAI API key from Streamlit secrets
+# Retrieve sensitive data from Streamlit Cloud secrets
 pdf_path = st.secrets["PDF_PATH"]         # e.g., "pdfs"
 openai_api_key = st.secrets["OPENAI_API_KEY"]
 
-# Debug: Display the secrets (remove sensitive info in production!)
-st.write("PDF Path:", pdf_path)
-st.write("API Key provided:", bool(openai_api_key))  # Show True/False for API key
-
-@st.cache_resource(show_spinner=False)
+# Load the RAG model (cached so it loads only once)
+@st.cache_resource
 def load_model():
-    try:
-        model = HRPolicyRAG(pdf_path, openai_api_key)
-        st.write("Model loaded successfully!")
-        return model
-    except Exception as e:
-        st.error(f"Error loading model: {e}")
-        return None
+    return HRPolicyRAG(pdf_path, openai_api_key)
 
 model = load_model()
 
-if model is None:
-    st.error("Model did not load. Please check your configuration.")
-else:
-    st.markdown("### Ask a question about our HR policies:")
-    user_question = st.text_input("Enter your question here:")
+# Initialize conversation history in session state if not already present.
+if "messages" not in st.session_state:
+    st.session_state["messages"] = []
 
-    if st.button("Get Answer") and user_question:
-        try:
-            answer = model.get_answer(user_question)
-            st.markdown("#### Answer:")
-            st.write(answer)
-        except Exception as e:
-            st.error(f"Error generating answer: {e}")
+# Define a list of suggested questions.
+suggestions = [
+    "What is the leave policy?",
+    "How can I update my personal details?",
+    "What benefits do employees receive?"
+]
+
+# Display suggestion buttons at the top of the chat interface.
+st.markdown("#### Suggested Questions:")
+cols = st.columns(len(suggestions))
+for idx, sug in enumerate(suggestions):
+    if cols[idx].button(sug, key=f"sug_{idx}"):
+        # Process the suggestion immediately.
+        st.session_state["messages"].append({"role": "user", "content": sug})
+        with st.spinner("Generating answer..."):
+            answer = model.get_answer(sug)
+        st.session_state["messages"].append({"role": "assistant", "content": answer})
+        st.experimental_rerun()
+
+# Display the chat conversation.
+st.markdown("### Conversation")
+for msg in st.session_state["messages"]:
+    if msg["role"] == "user":
+        st.chat_message("user").write(msg["content"])
+    else:
+        st.chat_message("assistant").write(msg["content"])
+
+# Chat input at the footer.
+user_input = st.chat_input("Type your message here...")
+if user_input:
+    st.session_state["messages"].append({"role": "user", "content": user_input})
+    with st.spinner("Generating answer..."):
+        answer = model.get_answer(user_input)
+    st.session_state["messages"].append({"role": "assistant", "content": answer})
+    st.experimental_rerun()
